@@ -479,6 +479,8 @@ parser.add_argument("--depth", type=int, default=DEPTH, help="Number of transfor
 parser.add_argument("--model-dim", type=int, default=None, help="Optional model width override. Must be divisible by HEAD_DIM.")
 parser.add_argument("--max-steps", type=int, default=None, help="Optional early stop after this many optimizer steps.")
 parser.add_argument("--skip-eval", action="store_true", help="Skip final eval for faster capacity probing.")
+parser.add_argument("--lr-scale", type=float, default=1.0, help="Scale all optimizer learning rates by this factor.")
+parser.add_argument("--total-batch-size", type=int, default=TOTAL_BATCH_SIZE, help="Total tokens per optimizer step.")
 args = parser.parse_args()
 
 t_start = time.time()
@@ -526,16 +528,18 @@ print(f"Estimated FLOPs per token: {num_flops_per_token:e}")
 
 DEVICE_BATCH_SIZE = args.device_batch_size
 print(f"Device batch size: {DEVICE_BATCH_SIZE}")
+print(f"LR scale: {args.lr_scale}")
+print(f"Total batch size: {args.total_batch_size}")
 tokens_per_fwdbwd = DEVICE_BATCH_SIZE * MAX_SEQ_LEN
-assert TOTAL_BATCH_SIZE % tokens_per_fwdbwd == 0
-grad_accum_steps = TOTAL_BATCH_SIZE // tokens_per_fwdbwd
+assert args.total_batch_size % tokens_per_fwdbwd == 0
+grad_accum_steps = args.total_batch_size // tokens_per_fwdbwd
 
 optimizer = model.setup_optimizer(
-    unembedding_lr=UNEMBEDDING_LR,
-    embedding_lr=EMBEDDING_LR,
-    scalar_lr=SCALAR_LR,
+    unembedding_lr=UNEMBEDDING_LR * args.lr_scale,
+    embedding_lr=EMBEDDING_LR * args.lr_scale,
+    scalar_lr=SCALAR_LR * args.lr_scale,
     adam_betas=ADAM_BETAS,
-    matrix_lr=MATRIX_LR,
+    matrix_lr=MATRIX_LR * args.lr_scale,
     weight_decay=WEIGHT_DECAY,
 )
 
@@ -626,8 +630,8 @@ while True:
     smooth_train_loss = ema_beta * smooth_train_loss + (1 - ema_beta) * train_loss_f
     debiased_smooth_loss = smooth_train_loss / (1 - ema_beta**(step + 1))
     pct_done = 100 * progress
-    tok_per_sec = int(TOTAL_BATCH_SIZE / dt)
-    mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE / dt / H100_BF16_PEAK_FLOPS
+    tok_per_sec = int(args.total_batch_size / dt)
+    mfu = 100 * num_flops_per_token * args.total_batch_size / dt / H100_BF16_PEAK_FLOPS
     remaining = max(0, TIME_BUDGET - total_training_time)
 
     print(f"\rstep {step:05d} ({pct_done:.1f}%) | loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | dt: {dt*1000:.0f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.1f}% | epoch: {epoch} | remaining: {remaining:.0f}s    ", end="", flush=True)
@@ -651,7 +655,7 @@ while True:
 
 print()  # newline after \r training log
 
-total_tokens = step * TOTAL_BATCH_SIZE
+total_tokens = step * args.total_batch_size
 
 # Final eval
 val_bpb = None
@@ -665,7 +669,7 @@ else:
 # Final summary
 t_end = time.time()
 startup_time = t_start_training - t_start
-steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
+steady_state_mfu = 100 * num_flops_per_token * args.total_batch_size * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 
 print("---")
