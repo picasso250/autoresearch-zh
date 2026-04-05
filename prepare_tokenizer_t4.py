@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import os
 import pickle
-import shutil
 import time
 
 import rustbpe
@@ -17,6 +16,10 @@ import tiktoken
 import torch
 
 import prepare
+
+
+def tokenizer_dir_for(dataset: str, vocab_size: int) -> str:
+    return os.path.join(prepare._dataset_root(dataset), f"tokenizer-vocab-{vocab_size}")
 
 
 def main() -> int:
@@ -28,7 +31,7 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="Overwrite an existing tokenizer directory.")
     args = parser.parse_args()
 
-    tokenizer_dir = prepare._tokenizer_dir(args.dataset)
+    tokenizer_dir = tokenizer_dir_for(args.dataset, args.vocab_size)
     tokenizer_pkl = os.path.join(tokenizer_dir, "tokenizer.pkl")
     token_bytes_path = os.path.join(tokenizer_dir, "token_bytes.pt")
     vocab_size_path = os.path.join(tokenizer_dir, "vocab_size.txt")
@@ -48,9 +51,6 @@ def main() -> int:
     ):
         print(f"Tokenizer already exists at {tokenizer_dir} with vocab_size={args.vocab_size}")
         return 0
-
-    if os.path.isdir(tokenizer_dir) and args.force:
-        shutil.rmtree(tokenizer_dir)
 
     os.makedirs(tokenizer_dir, exist_ok=True)
     print(

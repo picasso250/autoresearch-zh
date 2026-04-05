@@ -200,6 +200,7 @@ def generate(model, tokenizer, prompt, max_new_tokens, temperature, top_k, devic
 def main():
     parser = argparse.ArgumentParser(description="Generate text from checkpoint_last.pt")
     parser.add_argument("--dataset", choices=("tinystories", "tinystorieszh"), default=None)
+    parser.add_argument("--tokenizer-dir", default=None)
     parser.add_argument("--checkpoint", default="checkpoint_last.pt")
     parser.add_argument("--prompt", default="从前有一只小猫")
     parser.add_argument("--max-new-tokens", type=int, default=120)
@@ -210,7 +211,8 @@ def main():
     payload = torch.load(args.checkpoint, map_location="cpu")
     config = GPTConfig(**payload["config"])
     dataset = args.dataset or payload.get("dataset")
-    tokenizer = Tokenizer.from_directory(dataset=dataset)
+    tokenizer_dir = args.tokenizer_dir or payload.get("tokenizer_dir")
+    tokenizer = Tokenizer.from_directory(tokenizer_dir=tokenizer_dir, dataset=dataset)
     device = torch.device("cuda")
     model = GPT(config)
     model.load_state_dict(payload["model_state_dict"])

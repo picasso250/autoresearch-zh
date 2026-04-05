@@ -474,6 +474,7 @@ DEFAULT_DEVICE_BATCH_SIZE = 16 if cap < (8, 0) else 128  # T4-safe fallback
 
 parser = argparse.ArgumentParser(description="Autoresearch training script")
 parser.add_argument("--dataset", choices=DATASET_CHOICES, default=None, help="Optional dataset override.")
+parser.add_argument("--tokenizer-dir", default=None, help="Optional tokenizer directory override.")
 parser.add_argument("--device-batch-size", type=int, default=DEFAULT_DEVICE_BATCH_SIZE, help="Per-device batch size.")
 parser.add_argument("--depth", type=int, default=DEPTH, help="Number of transformer layers.")
 parser.add_argument("--model-dim", type=int, default=None, help="Optional model width override. Must be divisible by HEAD_DIM.")
@@ -491,10 +492,12 @@ device = torch.device("cuda")
 autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=LOW_PRECISION_DTYPE)
 H100_BF16_PEAK_FLOPS = 989.5e12
 
-tokenizer = Tokenizer.from_directory(dataset=args.dataset)
+tokenizer = Tokenizer.from_directory(tokenizer_dir=args.tokenizer_dir, dataset=args.dataset)
 vocab_size = tokenizer.get_vocab_size()
 print(f"Vocab size: {vocab_size:,}")
 print(f"Dataset: {tokenizer.dataset}")
+if args.tokenizer_dir:
+    print(f"Tokenizer dir: {args.tokenizer_dir}")
 
 def build_model_config(depth):
     if args.model_dim is None:
@@ -673,6 +676,7 @@ torch.save(
         "config": asdict(config),
         "step": step,
         "dataset": tokenizer.dataset,
+        "tokenizer_dir": args.tokenizer_dir,
         "device_batch_size": DEVICE_BATCH_SIZE,
         "total_batch_size": args.total_batch_size,
         "lr_scale": args.lr_scale,
