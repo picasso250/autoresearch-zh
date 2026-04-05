@@ -475,6 +475,10 @@ DEFAULT_DEVICE_BATCH_SIZE = 16 if cap < (8, 0) else 128  # T4-safe fallback
 parser = argparse.ArgumentParser(description="Autoresearch training script")
 parser.add_argument("--dataset", choices=DATASET_CHOICES, default=None, help="Optional dataset override.")
 parser.add_argument("--device-batch-size", type=int, default=DEFAULT_DEVICE_BATCH_SIZE, help="Per-device batch size.")
+parser.add_argument("--depth", type=int, default=DEPTH, help="Number of transformer layers.")
+parser.add_argument("--model-dim", type=int, default=None, help="Optional model width override. Must be divisible by HEAD_DIM.")
+parser.add_argument("--max-steps", type=int, default=None, help="Optional early stop after this many optimizer steps.")
+parser.add_argument("--skip-eval", action="store_true", help="Skip final eval for faster capacity probing.")
 args = parser.parse_args()
 
 t_start = time.time()
@@ -491,8 +495,12 @@ print(f"Vocab size: {vocab_size:,}")
 print(f"Dataset: {tokenizer.dataset}")
 
 def build_model_config(depth):
-    base_dim = depth * ASPECT_RATIO
-    model_dim = ((base_dim + HEAD_DIM - 1) // HEAD_DIM) * HEAD_DIM
+    if args.model_dim is None:
+        base_dim = depth * ASPECT_RATIO
+        model_dim = ((base_dim + HEAD_DIM - 1) // HEAD_DIM) * HEAD_DIM
+    else:
+        model_dim = args.model_dim
+        assert model_dim % HEAD_DIM == 0, f"model_dim must be divisible by {HEAD_DIM}"
     num_heads = model_dim // HEAD_DIM
     return GPTConfig(
         sequence_len=MAX_SEQ_LEN, vocab_size=vocab_size,
@@ -500,7 +508,7 @@ def build_model_config(depth):
         window_pattern=WINDOW_PATTERN,
     )
 
-config = build_model_config(DEPTH)
+config = build_model_config(args.depth)
 print(f"Model config: {asdict(config)}")
 
 with torch.device("meta"):
@@ -634,6 +642,9 @@ while True:
 
     step += 1
 
+    if args.max_steps is not None and step >= args.max_steps:
+        break
+
     # Time's up — but only stop after warmup steps so we don't count compilation
     if step > 10 and total_training_time >= TIME_BUDGET:
         break
@@ -643,9 +654,13 @@ print()  # newline after \r training log
 total_tokens = step * TOTAL_BATCH_SIZE
 
 # Final eval
-model.eval()
-with autocast_ctx:
-    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, dataset=tokenizer.dataset)
+val_bpb = None
+if args.skip_eval:
+    print("Skipping final eval (--skip-eval).")
+else:
+    model.eval()
+    with autocast_ctx:
+        val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, dataset=tokenizer.dataset)
 
 # Final summary
 t_end = time.time()
@@ -654,7 +669,10 @@ steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / 
 peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 
 print("---")
-print(f"val_bpb:          {val_bpb:.6f}")
+if val_bpb is None:
+    print("val_bpb:          skipped")
+else:
+    print(f"val_bpb:          {val_bpb:.6f}")
 print(f"training_seconds: {total_training_time:.1f}")
 print(f"total_seconds:    {t_end - t_start:.1f}")
 print(f"peak_vram_mb:     {peak_vram_mb:.1f}")
@@ -662,5 +680,6 @@ print(f"mfu_percent:      {steady_state_mfu:.2f}")
 print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
 print(f"num_steps:        {step}")
 print(f"num_params_M:     {num_params / 1e6:.1f}")
-print(f"depth:            {DEPTH}")
+print(f"depth:            {args.depth}")
+print(f"model_dim:        {config.n_embd}")
 print(f"dataset:          {tokenizer.dataset}")
