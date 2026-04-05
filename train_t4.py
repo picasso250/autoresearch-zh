@@ -466,7 +466,7 @@ FINAL_LR_FRAC = 0.0     # final LR as fraction of initial
 
 # Model size
 DEPTH = 8               # number of transformer layers
-DEVICE_BATCH_SIZE = 128  # per-device batch size (reduce if OOM)
+DEFAULT_DEVICE_BATCH_SIZE = 16 if cap < (8, 0) else 128  # T4-safe fallback
 
 # ---------------------------------------------------------------------------
 # Setup: tokenizer, model, optimizer, dataloader
@@ -474,6 +474,7 @@ DEVICE_BATCH_SIZE = 128  # per-device batch size (reduce if OOM)
 
 parser = argparse.ArgumentParser(description="Autoresearch training script")
 parser.add_argument("--dataset", choices=DATASET_CHOICES, default=None, help="Optional dataset override.")
+parser.add_argument("--device-batch-size", type=int, default=DEFAULT_DEVICE_BATCH_SIZE, help="Per-device batch size.")
 args = parser.parse_args()
 
 t_start = time.time()
@@ -515,6 +516,8 @@ num_params = param_counts['total']
 num_flops_per_token = model.estimate_flops()
 print(f"Estimated FLOPs per token: {num_flops_per_token:e}")
 
+DEVICE_BATCH_SIZE = args.device_batch_size
+print(f"Device batch size: {DEVICE_BATCH_SIZE}")
 tokens_per_fwdbwd = DEVICE_BATCH_SIZE * MAX_SEQ_LEN
 assert TOTAL_BATCH_SIZE % tokens_per_fwdbwd == 0
 grad_accum_steps = TOTAL_BATCH_SIZE // tokens_per_fwdbwd
