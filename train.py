@@ -1,9 +1,10 @@
 """
 Autoresearch pretraining script. Single-GPU, single-file.
 Cherry-picked and simplified from nanochat.
-Usage: uv run train.py
+Usage: uv run train.py --dataset tinystorieszh
 """
 
+import argparse
 import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -23,7 +24,7 @@ cap = torch.cuda.get_device_capability()
 repo = "varunneal/flash-attention-3" if cap == (9, 0) else "kernels-community/flash-attn3"
 fa3 = get_kernel(repo).flash_attn_interface
 
-from prepare import MAX_SEQ_LEN, TIME_BUDGET, Tokenizer, make_dataloader, evaluate_bpb
+from prepare import DATASET_CHOICES, MAX_SEQ_LEN, TIME_BUDGET, Tokenizer, make_dataloader, evaluate_bpb
 
 # ---------------------------------------------------------------------------
 # GPT Model
@@ -454,6 +455,10 @@ DEVICE_BATCH_SIZE = 128  # per-device batch size (reduce if OOM)
 # Setup: tokenizer, model, optimizer, dataloader
 # ---------------------------------------------------------------------------
 
+parser = argparse.ArgumentParser(description="Autoresearch training script")
+parser.add_argument("--dataset", choices=DATASET_CHOICES, default=None, help="Optional dataset override.")
+args = parser.parse_args()
+
 t_start = time.time()
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
@@ -462,9 +467,10 @@ device = torch.device("cuda")
 autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
 H100_BF16_PEAK_FLOPS = 989.5e12
 
-tokenizer = Tokenizer.from_directory()
+tokenizer = Tokenizer.from_directory(dataset=args.dataset)
 vocab_size = tokenizer.get_vocab_size()
 print(f"Vocab size: {vocab_size:,}")
+print(f"Dataset: {tokenizer.dataset}")
 
 def build_model_config(depth):
     base_dim = depth * ASPECT_RATIO
@@ -507,7 +513,13 @@ optimizer = model.setup_optimizer(
 
 model = torch.compile(model, dynamic=False)
 
-train_loader = make_dataloader(tokenizer, DEVICE_BATCH_SIZE, MAX_SEQ_LEN, "train")
+train_loader = make_dataloader(
+    tokenizer,
+    DEVICE_BATCH_SIZE,
+    MAX_SEQ_LEN,
+    "train",
+    dataset=tokenizer.dataset,
+)
 x, y, epoch = next(train_loader)  # prefetch first batch
 
 print(f"Time budget: {TIME_BUDGET}s")
@@ -610,7 +622,7 @@ total_tokens = step * TOTAL_BATCH_SIZE
 # Final eval
 model.eval()
 with autocast_ctx:
-    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
+    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, dataset=tokenizer.dataset)
 
 # Final summary
 t_end = time.time()
@@ -628,3 +640,4 @@ print(f"total_tokens_M:   {total_tokens / 1e6:.1f}")
 print(f"num_steps:        {step}")
 print(f"num_params_M:     {num_params / 1e6:.1f}")
 print(f"depth:            {DEPTH}")
+print(f"dataset:          {tokenizer.dataset}")
