@@ -666,6 +666,23 @@ else:
     with autocast_ctx:
         val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, dataset=tokenizer.dataset)
 
+checkpoint_path = "checkpoint_last.pt"
+torch.save(
+    {
+        "model_state_dict": model.state_dict(),
+        "config": asdict(config),
+        "step": step,
+        "dataset": tokenizer.dataset,
+        "device_batch_size": DEVICE_BATCH_SIZE,
+        "total_batch_size": args.total_batch_size,
+        "lr_scale": args.lr_scale,
+        "max_steps": args.max_steps,
+        "val_bpb": val_bpb,
+    },
+    checkpoint_path,
+)
+print(f"Saved {checkpoint_path}")
+
 # Final summary
 t_end = time.time()
 startup_time = t_start_training - t_start
